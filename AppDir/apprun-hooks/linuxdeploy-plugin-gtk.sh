@@ -38,3 +38,5 @@ export LC_ALL=C
 export FONTCONFIG_PATH=/etc/fonts
 export LC_ALL=C
 export FONTCONFIG_PATH=/etc/fonts
+export LC_ALL=C
+export FONTCONFIG_PATH=/etc/fonts

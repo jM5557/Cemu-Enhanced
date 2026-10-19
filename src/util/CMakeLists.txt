@@ -28,6 +28,7 @@ add_library(CemuUtil
   helpers/MapAdaptor.h
   helpers/MemoryPool.h
   helpers/ringbuffer.h
+  helpers/StateHasher.h
   helpers/Semaphore.h
   helpers/Serializer.cpp
   helpers/Serializer.h
@@ -37,6 +38,7 @@ add_library(CemuUtil
   helpers/StringParser.h
   helpers/SystemException.h
   helpers/TempState.h
+  helpers/ZipArchive.h
   highresolutiontimer/HighResolutionTimer.cpp
   highresolutiontimer/HighResolutionTimer.h
   ImageWriter/bmp.h

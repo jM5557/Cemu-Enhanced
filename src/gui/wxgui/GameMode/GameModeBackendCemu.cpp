@@ -629,9 +629,14 @@ wxString GameModeBackendCemu::GetGameMenuBindingLabel()
 	if (binding.controller != sHotkeyCfg::controllerNone)
 	{
 		const auto controllers = AllControllers();
-		controllerText = controllers.empty()
-			? wxString::Format(_("Button %d"), (int)binding.controller)
-			: wxString::FromUTF8(controllers.front()->get_button_name(binding.controller));
+		if (controllers.empty())
+			controllerText = wxString::Format(_("Button %d"), (int)binding.controller);
+		else
+		{
+			controllerText = wxString::FromUTF8(controllers.front()->get_button_name(binding.controller));
+			if (!HotkeySettings::IsGameMenuTapButton(*controllers.front(), binding.controller))
+				controllerText = wxString::Format(_("Hold %s"), controllerText);
+		}
 	}
 	const wxString keyText = HotkeySettings::KeyboardHotkeyLabel(binding.keyboard);
 	if (controllerText.empty() && binding.keyboard.raw == sHotkeyCfg::keyboardNone)
@@ -1163,7 +1168,12 @@ namespace
 	private:
 		CemuAudioSink() = default;
 		static constexpr int kRate = 48000;
-		static constexpr int kBlock = 1024;
+		// 100 ms, as Cemu's own boot sound uses. DirectSound (the default backend) is asked for the
+		// next block when the previous one starts playing, but on current Windows it has already
+		// committed about 30 ms ahead by then. A 1024-frame (21 ms) block was cut by that point every
+		// time, half new sound and half the previous lap's, which crackled. A block longer than the
+		// committed span starts after it.
+		static constexpr int kBlock = 4800;
 		AudioAPIPtr m_device;
 	};
 

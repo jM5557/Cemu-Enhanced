@@ -84,6 +84,10 @@ uint32 currentUpdatedApplicationHash = 0;
 
 bool isLaunchTypeELF = false;
 
+// nsysnet.h brings in WinSock2.h, which does not mix with what this file includes before it
+sint32 nsysnet_getOpenSocketCount();
+void nsysnet_closeAllSockets();
+
 MPTR _entryPoint = MPTR_NULL;
 
 uint32 generateHashFromRawRPXData(uint8* rpxData, sint32 size)
@@ -191,7 +195,6 @@ void LoadMainExecutable()
 		currentBaseApplicationHash = generateHashFromRawRPXData(baseRpxData, baseRpxSize);
 	}
 	free(baseRpxData);
-	debug_printf("RPXHash: 0x%08x\n", currentBaseApplicationHash);
 }
 
 fs::path getTitleSavePath()
@@ -446,6 +449,7 @@ namespace CafeSystem
 	static SystemImplementation* s_implementation{nullptr};
     bool sLaunchModeIsStandalone = false;
 	std::optional<std::vector<std::string>> s_overrideArgs;
+	std::optional<sint32> s_foregroundReturnStatus;
 
 	bool sSystemRunning = false;
 	std::atomic_bool sTitlePaused = false;
@@ -690,6 +694,22 @@ namespace CafeSystem
         fsc_unmount("/cemuBossStorage/", FSC_PRIORITY_BASE);
     }
 
+	void MountExtras()
+	{
+		for (const auto& [host_path, emulatedPath] : LaunchSettings::CosMounts())
+		{
+			FSCDeviceHostFS_Mount(boost::nowide::narrow(emulatedPath), _pathToUtf8(host_path), FSC_PRIORITY_BASE);
+		}
+	}
+
+	void UnmountExtras()
+	{
+		for (const auto& [_, emulatedPath] : LaunchSettings::CosMounts())
+		{
+			fsc_unmount(boost::nowide::narrow(emulatedPath), FSC_PRIORITY_BASE);
+		}
+	}
+
 	PREPARE_STATUS_CODE LoadAndMountForegroundTitle(TitleId titleId)
 	{
         cemuLog_log(LogType::Force, "Mounting title {:016x}", (uint64)titleId);
@@ -825,6 +845,7 @@ namespace CafeSystem
 	{
 		CafeTitleList::WaitForMandatoryScan();
 		sLaunchModeIsStandalone = false;
+		s_foregroundReturnStatus = std::nullopt;
         _pathToExecutable.clear();
 		TitleIdParser tip(titleId);
 		if (tip.GetType() == TitleIdParser::TITLE_TYPE::AOC || tip.GetType() == TitleIdParser::TITLE_TYPE::BASE_TITLE_UPDATE)
@@ -843,6 +864,7 @@ namespace CafeSystem
 		if (r != PREPARE_STATUS_CODE::SUCCESS)
 			return r;
 		InitVirtualMlcStorage();
+		MountExtras();
 		return PREPARE_STATUS_CODE::SUCCESS;
 	}
 
@@ -886,6 +908,7 @@ namespace CafeSystem
         // load executable
         PrepareExecutable();
 		InitVirtualMlcStorage();
+		MountExtras();
 		return PREPARE_STATUS_CODE::SUCCESS;
 	}
 
@@ -921,6 +944,11 @@ namespace CafeSystem
 		std::lock_guard lock(sPauseMutex);
 		if (!sSystemRunning || sTitlePaused)
 			return;
+		if (IsTitleOnline())
+		{
+			cemuLog_log(LogType::Force, "Pause refused: the game is online");
+			return;
+		}
 		sTitlePaused = true;
 		coreinit::SuspendActiveThreads();
 		PPCTimer_setPaused(true); // the console clock stops too, so in-game timers do not run on
@@ -944,6 +972,11 @@ namespace CafeSystem
 	bool IsTitlePaused()
 	{
 		return sTitlePaused;
+	}
+
+	bool IsTitleOnline()
+	{
+		return sSystemRunning && nsysnet_getOpenSocketCount() > 0;
 	}
 
 	TitleId GetForegroundTitleId()
@@ -995,6 +1028,9 @@ namespace CafeSystem
 
 	std::string GetForegroundTitleArgStr()
 	{
+		auto optional_arguments = LaunchSettings::CosArgstr();
+		if (optional_arguments.has_value())
+			return *optional_arguments;
 		if (sLaunchModeIsStandalone)
 			return "";
 		auto& update = sGameInfo_ForegroundTitle.GetUpdate();
@@ -1080,25 +1116,28 @@ namespace CafeSystem
 		if(!sSystemRunning)
 			return;
 		ResumeTitle(); // shut down from a running state
-        CheatManager::OnTitleStop();
-        coreinit::OSSchedulerEnd();
-        Latte_Stop();
-        // reset Cafe OS userspace modules
-        snd_core::reset();
-        coreinit::OSAlarm_Shutdown();
-        GX2::_GX2DriverReset();
-        nn::save::ResetToDefaultState();
-        coreinit::__OSDeleteAllActivePPCThreads();
-        RPLLoader_UnloadAll();
+		CheatManager::OnTitleStop();
+		coreinit::OSSchedulerEnd();
+		Latte_Stop();
+		// reset Cafe OS userspace modules
+		snd_core::reset();
+		coreinit::OSAlarm_Shutdown();
+		GX2::_GX2DriverReset();
+		nn::save::ResetToDefaultState();
+		coreinit::__OSDeleteAllActivePPCThreads();
+		RPLLoader_UnloadAll();
+		nsysnet_closeAllSockets();
 		for(auto it = s_iosuModules.rbegin(); it != s_iosuModules.rend(); ++it)
 			(*it)->TitleStop();
-        // reset Cemu subsystems
-        PPCRecompiler_Shutdown();
-        GraphicPack2::Reset();
-        UnmountCurrentTitle();
-        MlcStorageUnmountAllTitles();
-        UnmountBaseDirectories();
-        DestroyMemorySpace();
+		// reset Cemu subsystems
+		PPCRecompiler_Shutdown();
+		GraphicPack2::Reset();
+		UnmountCurrentTitle();
+		UnmountExtras();
+		MlcStorageUnmountAllTitles();
+		UnmountBaseDirectories();
+		DestroyMemorySpace();
+		LaunchSettings::ClearCosArgstr();
 		sSystemRunning = false;
 	}
 
@@ -1200,4 +1239,56 @@ namespace CafeSystem
 		s_implementation->CafeRecreateCanvas();
 	}
 
+	void NotifyPPCProcessExit(sint32 status)
+	{
+		s_foregroundReturnStatus = status;
+		s_implementation->CafePPCProcessExit();
+	}
+
+	std::optional<sint32> GetForegroundTitleReturnStatus()
+	{
+		return s_foregroundReturnStatus;
+	}
+
+
+	void DumpCurrentRPX()
+	{
+		if (!IsTitleRunning() || _pathToExecutable.empty())
+			return;
+		const fs::path dumpDirectory = ActiveSettings::GetUserDataPath("dump/rpx/{:016x}", GetForegroundTitleId());
+		std::error_code ec;
+		fs::create_directories(dumpDirectory, ec);
+		if (ec)
+		{
+			cemuLog_log(LogType::Force, "Failed to create RPX dump directory \"{}\": {}", _pathToUtf8(dumpDirectory), ec.message());
+			return;
+		}
+		auto dumpFile = [&dumpDirectory](const std::string& sourcePath)
+		{
+			auto fileData = fsc_extractFile(sourcePath.c_str());
+			if (!fileData)
+				return;
+			FileStream* fs = FileStream::createFile2(dumpDirectory / _utf8ToPath(sourcePath).filename());
+			if (!fs)
+				return;
+			fs->writeData(fileData->data(), (sint32)fileData->size());
+			delete fs;
+		};
+		// dump RPX
+		dumpFile(_pathToExecutable);
+		// dump RPLs
+		const std::string codeDirectory = _pathToExecutable.substr(0, _pathToExecutable.find_last_of('/') + 1);
+		sint32 fscStatus;
+		FSCVirtualFile* dirIterator = fsc_openDirIterator(codeDirectory.c_str(), &fscStatus);
+		if (dirIterator)
+		{
+			FSCDirEntry dirEntry;
+			while (fsc_nextDir(dirIterator, &dirEntry))
+			{
+				if (dirEntry.isFile && boost::iends_with(dirEntry.path, ".rpl"))
+					dumpFile(codeDirectory + dirEntry.path);
+			}
+			fsc_close(dirIterator);
+		}
+	}
 }

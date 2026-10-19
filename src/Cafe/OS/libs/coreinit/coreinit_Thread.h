@@ -501,6 +501,11 @@ struct OSThread_t
 };
 static_assert(sizeof(OSThread_t) == 0x6A0);
 
+namespace SaveStates
+{
+	class StateStream;
+}
+
 namespace coreinit
 {
 	void MapThreadExports();
@@ -611,6 +616,17 @@ namespace coreinit
 	void OSSchedulerBegin(sint32 numCPUEmulationThreads);
 	void OSSchedulerEnd();
 	bool OSIsSchedulerActive();
+	size_t OSGetSchedulerThreadCount();
+
+	// save states
+	bool __OSIsCurrentThreadScheduler();
+	void __OSQuiesceWakeCores();
+	void __OSQuiesceReleaseCores();
+	void ThreadDoState(SaveStates::StateStream& s);
+	void __OSRebuildHostThreadsAfterStateLoad();
+	void __OSRestartHLEBlockedThreadsAfterStateLoad();
+	void __OSRebuildRunQueueCountsAfterStateLoad();
+	void __OSStartStallWatchdogAfterStateLoad();
 
 	// pause support: suspend / resume every active thread (each keeps its own suspend count)
 	void SuspendActiveThreads();

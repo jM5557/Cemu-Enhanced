@@ -121,7 +121,7 @@ struct wxCemuConfig
 
 	ConfigValue<bool> did_show_vulkan_warning{false};
 	ConfigValue<bool> did_show_graphic_pack_download{false}; // no longer used but we keep the config value around in case people downgrade Cemu. Despite the name this was used for the Getting Started dialog
-	ConfigValue<bool> did_show_macos_disclaimer{false};
+	ConfigValue<bool> did_show_macos_disclaimer{false}; // no longer used
 
 	ConfigValue<bool> show_icon_column{true};
 
@@ -150,7 +150,8 @@ struct wxCemuConfig
 		sHotkeyCfg toggleFastForward;
 		sHotkeyCfg exitApplication;
 		// Opens the Game Menu over the running game. Unlike the other controller hotkeys it does
-		// not need the modifier button held, so a single Guide press works.
+		// not need the modifier button held, so a single Guide press works. Any other controller
+		// button has to be held (HotkeySettings::IsGameMenuTapButton).
 		sHotkeyCfg gameMenu;
 #ifdef CEMU_DEBUG_ASSERT
 		sHotkeyCfg endEmulation;

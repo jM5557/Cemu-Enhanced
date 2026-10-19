@@ -2,6 +2,8 @@
 #include "Cafe/OS/libs/TCL/TCL.h"
 
 #include "HW/Latte/Core/LattePM4.h"
+#include "OS/libs/coreinit/coreinit_Time.h"
+#include "Cafe/SaveState/StateStream.h"
 
 namespace TCL
 {
@@ -80,6 +82,40 @@ namespace TCL
 		return true;
 	}
 
+	// Save states.
+	//
+	// The command ring lives in HOST memory: the buffer itself, the GPU's read cursor and
+	// the CPU's write cursor are all outside guest address space, so a RAM snapshot covers
+	// none of it. The guest's own submission bookkeeping IS restored, so without this the
+	// two halves disagree after a load -- the GPU keeps consuming from wherever the
+	// pre-load timeline left off while the guest believes it is starting over. The visible
+	// result is a command processor parsing a desynced stream and a display frozen on the
+	// last frame it managed to present.
+	bool TCLGPUIsRingBufferEmpty()
+	{
+		return tclRingBufferA_readIndex.load(std::memory_order::acquire) ==
+			   tclRingBufferA_writeIndex.load(std::memory_order::acquire);
+	}
+
+	void TCLDoState(SaveStates::StateStream& s)
+	{
+		s.DoMarker(SaveStates::kMarkerGX2S, "TCL/ring");
+
+		s.Do(s_currentRetireMarker);
+
+		if (s.IsReading())
+		{
+			// The quiesce drains the ring before a state is captured, so a state is only
+			// ever taken with an empty ring. Restoring it to empty keeps the GPU read
+			// cursor and the CPU write cursor in agreement; leftover words from the
+			// pre-load timeline would otherwise be read as part of the restored stream.
+			tclRingBufferA_readIndex.store(0, std::memory_order::release);
+			tclRingBufferA_writeIndex.store(0, std::memory_order::release);
+		}
+
+		s.DoMarker(SaveStates::kMarkerGX2S, "TCL/ring-end");
+	}
+
 	void TCLWaitForRBSpace(uint32be numU32s)
 	{
 		uint32 writeIndex = tclRingBufferA_writeIndex.load(std::memory_order::relaxed);
@@ -91,7 +127,7 @@ namespace TCL
 				distance = TCL_RING_BUFFER_SIZE;
 			if (distance >= numU32s + 1) // assume distance minus one, because we are never allowed to completely wrap around
 				break;
-			_mm_pause();
+			coreinit::OSSleepTicks(coreinit::EspressoTime::ConvertNsToTimerTicks(500000)); // sleep 0.5ms
 		}
 	}
 

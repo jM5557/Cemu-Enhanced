@@ -1,6 +1,7 @@
 #include "Cafe/HW/Latte/ISA/RegDefines.h"
 #include "Cafe/OS/libs/gx2/GX2.h" // todo - remove dependency
 #include "Cafe/HW/Latte/Core/Latte.h"
+#include "Cafe/SaveState/StateStream.h"
 #include "Cafe/HW/Latte/Core/LatteDraw.h"
 #include "Cafe/HW/Latte/Core/LatteShader.h"
 #include "Cafe/HW/Latte/Core/LatteAsyncCommands.h"
@@ -9,8 +10,10 @@
 #include "WindowSystem.h"
 
 #include "Cafe/HW/Latte/Core/LatteBufferCache.h"
+#include "Cafe/HW/Latte/Core/LatteCachedFBO.h"
 
 #include "Cafe/HW/Latte/Renderer/Renderer.h"
+#include "Cafe/HW/Latte/Core/LatteIndices.h" // must follow Renderer.h (uses Renderer::INDEX_TYPE)
 #include "Cafe/HW/Latte/Core/LatteTexture.h"
 #include "util/helpers/helpers.h"
 
@@ -20,6 +23,72 @@
 #include "Cafe/CafeSystem.h"
 
 LatteGPUState_t LatteGPUState = {};
+
+// Save states: Latte GPU state that lives on the host side.
+//
+// The flip handshake is split across the host/guest boundary. The guest's request and
+// execute counters live in the GX2 shared area (guest memory, restored by MEMR), but the
+// count of swaps the GPU has actually seen is a host atomic:
+//
+//     LatteCommandProcessor.cpp: LatteGPUState.flipRequestCount.fetch_add(1)  (GPU side)
+//     LatteTiming.cpp:           if (flipRequestCount > 0) { fetch_sub(1); guest execute++ }
+//
+// A state load rewinds the guest counters and empties the command ring, discarding any
+// swap command that was still in flight. If the host counter is not restored alongside
+// them, a guest that comes back with a pending flip waits for a swap that can never be
+// executed: the game keeps running but the picture never updates again.
+void Latte_DoState(SaveStates::StateStream& s)
+{
+	s.DoMarker(SaveStates::kMarkerLATT, "Latte/gpu-state");
+
+	uint64 flipRequestCount = LatteGPUState.flipRequestCount.load();
+	s.Do(flipRequestCount);
+	if (s.IsReading())
+		LatteGPUState.flipRequestCount.store(flipRequestCount);
+
+	// Frame/flip counters are only used for statistics and pacing heuristics, but keeping
+	// them consistent with the restored world costs nothing.
+	s.Do(LatteGPUState.frameCounter);
+	s.Do(LatteGPUState.flipCounter);
+
+	s.DoMarker(SaveStates::kMarkerLATT, "Latte/gpu-state-end");
+}
+
+// Save states: drop the host GPU caches that a state load invalidates.
+//
+// The texture cache, the buffer cache and the index cache are all keyed by *guest address*.
+// That key is only meaningful while the contents of those addresses evolve the way the GPU
+// observed them evolving. A state load replaces every one of those addresses at once, with
+// data from a different point in time, so every cached entry becomes a host-side copy of
+// something that was never there -- and the caches cannot notice, because their
+// invalidation is driven by guest writes they did not see happen.
+//
+// Compiled shaders and pipelines are deliberately kept. They are keyed by the hash of the
+// shader program rather than by an address, so a state load cannot invalidate them, and
+// rebuilding them is precisely what makes a cold boot stutter.
+//
+// Called only from the Latte thread (see SaveStates::GpuHandleStateWork), at a command
+// packet boundary, with guest memory already restored.
+void Latte_DropCachesForStateLoad()
+{
+	// Detach the current render targets before deleting anything. Deleting a texture tears
+	// down the cached FBOs that reference it, and leaving a binding that points at a view
+	// about to be freed is how a cache drop turns into a use-after-free on the next draw.
+	for (uint32 i = 0; i < Latte::GPU_LIMITS::NUM_COLOR_ATTACHMENTS; i++)
+		LatteMRT::SetColorAttachment(i, nullptr);
+	LatteMRT::SetDepthAndStencilAttachment(nullptr, false);
+
+	LatteTC_UnloadAllTextures();  // also drops every cached FBO and the empty FBO
+	LatteBufferCache_UnloadAll(); // vertex/uniform/attribute data staged out of guest RAM
+	LatteIndices_invalidateAll(); // converted index buffers, keyed by guest address
+
+	// Make the next drawcall re-resolve its textures and render targets from the restored
+	// guest registers instead of trusting anything carried over from before the load.
+	LatteGPUState.repeatTextureInitialization = true;
+	LatteGPUState.activeShaderHasError = false;
+
+	cemuLog_log(LogType::Force, "Save state: GPU caches dropped");
+}
 
 std::atomic_bool sLatteThreadRunning = false;
 std::atomic_bool sLatteThreadFinishedInit = false;

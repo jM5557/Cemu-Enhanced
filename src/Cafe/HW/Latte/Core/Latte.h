@@ -70,6 +70,20 @@ struct LatteGPUState_t
 
 extern LatteGPUState_t LatteGPUState;
 
+// drawcall context
+
+struct LatteDrawcallContext
+{
+	bool isFirst{}; // first _execute() in current sequence
+	// these are only valid if isFirst is false:
+	mutable uint32 vertexBufferDirtyMask{}; // mask of vertex buffer indices which have been modified since last draw execute
+	uint32 vsUniformBufferDirtyMask{}; // mask of uniform buffer indices which have been modified (changed address or size) since last draw execute
+	uint32 psUniformBufferDirtyMask{};
+	uint32 gsUniformBufferDirtyMask{};
+	bool aluConstVSDirty{};
+	bool aluConstPSDirty{};
+};
+
 // texture
 
 #include "Cafe/HW/Latte/Core/LatteTexture.h"
@@ -117,6 +131,7 @@ void LatteTexture_ReloadData(LatteTexture* hostTexture);
 
 bool LatteTC_HasTextureChanged(LatteTexture* hostTexture, bool force = false);
 void LatteTC_ResetTextureChangeTracker(LatteTexture* hostTexture, bool force = false);
+void LatteTC_FlagSliceAsGPUUpdated(LatteTexture* hostTexture, uint32 sliceIndex, uint32 mipIndex);
 
 void LatteTC_MarkTextureStillInUse(LatteTexture* texture); // lets the texture garbage collector know the texture is still in use at the time of this function call
 void LatteTC_CleanupUnusedTextures();
@@ -161,8 +176,8 @@ void LatteCP_ProcessRingbuffer();
 
 // buffer cache
 
-bool LatteBufferCache_Sync(uint32 minIndex, uint32 maxIndex, uint32 baseInstance, uint32 instanceCount);
-void LatteBufferCache_LoadRemappedUniforms(struct LatteDecompilerShader* shader, float* uniformData);
+void LatteBufferCache_Sync(uint32 maxIndex, uint32 baseInstance, uint32 instanceCount, uint32 attribBufferDirtyMask, uint32 vsUniformBufferDirtyMask, uint32 psUniformBufferDirtyMask, uint32 gsUniformBufferDirtyMask, uint8& stageUniformModifiedMask, bool isIncremental = false);
+bool LatteBufferCache_LoadRemappedUniforms(struct LatteDecompilerShader* shader, float* uniformData, bool aluConstDirty, uint32 uniformBufferDirtyMask);
 
 void LatteRenderTarget_updateViewport();
 
@@ -172,6 +187,11 @@ void LatteRenderTarget_updateViewport();
 //#define catchOpenGLError() glFinish(); if( (glTempError = glGetError()) != 0 ) { printf("OpenGL error 0x%x: %s : %d timestamp %08x\n", glTempError, __FILE__, __LINE__, GetTickCount()); __debugbreak(); }
 
 #define catchOpenGLError()
+
+namespace SaveStates { class StateStream; }
+void Latte_DoState(SaveStates::StateStream& s);
+// Drops the guest-address-keyed GPU caches after a state load. Latte thread only.
+void Latte_DropCachesForStateLoad();
 
 // Latte emulation control
 void Latte_Start();

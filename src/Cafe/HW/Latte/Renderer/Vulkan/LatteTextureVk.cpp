@@ -44,11 +44,19 @@ LatteTextureVk::LatteTextureVk(class VulkanRenderer* vkRenderer, Latte::E_DIM di
 			imageInfo.flags |= VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
 	}
 	
+	// A replacement file can be in another format than the game's texture (a DXT1 file for a DXT3
+	// texture), and its data is uploaded as is, so the image has to be created in the file's format.
+	// Limited to replacements: Vulkan has never applied a graphic pack's format overwrite.
+	Latte::E_GX2SURFFMT effectiveFormat = format;
+	if (overwriteInfo.hasFormatOverwrite && replOverwriteIsOurs)
+		effectiveFormat = (Latte::E_GX2SURFFMT)overwriteInfo.format;
+
 	VulkanRenderer::FormatInfoVK texFormatInfo;
-	vkRenderer->GetTextureFormatInfoVK(format, isDepth, dim, effectiveBaseWidth, effectiveBaseHeight, &texFormatInfo);
+	vkRenderer->GetTextureFormatInfoVK(effectiveFormat, isDepth, dim, effectiveBaseWidth, effectiveBaseHeight, &texFormatInfo);
 	cemu_assert_debug(hasStencil == ((texFormatInfo.vkImageAspect & VK_IMAGE_ASPECT_STENCIL_BIT) != 0));
 	imageInfo.format = texFormatInfo.vkImageFormat;
 	vkObjTex->m_imageAspect = texFormatInfo.vkImageAspect;
+	m_isAlternateFormat = texFormatInfo.isAlternateFormat;
 	
 	if (isDepth == false && texFormatInfo.isCompressed)
 	{
@@ -63,8 +71,14 @@ LatteTextureVk::LatteTextureVk(class VulkanRenderer* vkRenderer, Latte::E_DIM di
 	}
 	else
 	{
-		if(Latte::IsCompressedFormat(format) == false && texFormatInfo.vkImageFormat != VK_FORMAT_R4G4_UNORM_PACK8) // Vulkan's R4G4 cant be used as a color attachment
+		if(Latte::IsCompressedFormat(effectiveFormat) == false && texFormatInfo.vkImageFormat != VK_FORMAT_R4G4_UNORM_PACK8) // Vulkan's R4G4 cant be used as a color attachment
 			imageInfo.usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+	}
+
+	if (m_vkr->UseAttachmentFeedbackLoop() && (imageInfo.usage & (VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT)) != 0)
+	{
+		imageInfo.usage |= VK_IMAGE_USAGE_ATTACHMENT_FEEDBACK_LOOP_BIT_EXT;
+		m_defaultLayout = VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT;
 	}
 
 	if (dim == Latte::E_DIM::DIM_2D)

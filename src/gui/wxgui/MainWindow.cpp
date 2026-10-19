@@ -34,6 +34,7 @@
 #include "wxgui/GameMode/GameModeBackendCemu.h"
 #include "config/LaunchSettings.h"
 #include "config/ActiveSettings.h"
+#include "Cafe/SaveState/SaveState.h"
 
 // External functionality headers
 #include "input/InputManager.h"
@@ -85,6 +86,8 @@ enum
 	MAINFRAME_MENU_ID_FILE_CLEAR_SPOTPASS_CACHE,
 	MAINFRAME_MENU_ID_FILE_EXIT,
 	MAINFRAME_MENU_ID_FILE_END_EMULATION,
+	MAINFRAME_MENU_ID_FILE_SAVE_STATE,
+	MAINFRAME_MENU_ID_FILE_LOAD_STATE,
 	MAINFRAME_MENU_ID_FILE_RECENT_0,
 	MAINFRAME_MENU_ID_FILE_RECENT_LAST = MAINFRAME_MENU_ID_FILE_RECENT_0 + 15,
 	MAINFRAME_MENU_ID_FILE_PAUSE_EMULATION = 20190,
@@ -141,6 +144,18 @@ enum
 	MAINFRAME_MENU_ID_TIMER_SPEED_025X = 20705,
 	MAINFRAME_MENU_ID_TIMER_SPEED_0125X = 20706,
 
+	// save state slots
+	MAINFRAME_MENU_ID_FILE_SAVE_STATE_SLOT_0 = 20900, // 20800-20881 belong to View > Screen Layout and Game Mode
+	MAINFRAME_MENU_ID_FILE_SAVE_STATE_SLOT_LAST = MAINFRAME_MENU_ID_FILE_SAVE_STATE_SLOT_0 + 15,
+	MAINFRAME_MENU_ID_FILE_LOAD_STATE_SLOT_0 = 20920,
+	MAINFRAME_MENU_ID_FILE_LOAD_STATE_SLOT_LAST = MAINFRAME_MENU_ID_FILE_LOAD_STATE_SLOT_0 + 15,
+	MAINFRAME_MENU_ID_FILE_DELETE_STATE_SLOT_0 = 20940,
+	MAINFRAME_MENU_ID_FILE_DELETE_STATE_SLOT_LAST = MAINFRAME_MENU_ID_FILE_DELETE_STATE_SLOT_0 + 15,
+	MAINFRAME_MENU_ID_FILE_SAVE_STATE_TO_FILE = 20960,
+	MAINFRAME_MENU_ID_FILE_LOAD_STATE_FROM_FILE,
+	MAINFRAME_MENU_ID_FILE_OPEN_SAVESTATE_FOLDER,
+	MAINFRAME_MENU_ID_FILE_UNDO_LOAD_STATE,
+
 	// nfc->Touch NFC file
 	MAINFRAME_MENU_ID_NFC_TOUCH_NFC_FILE = 21000,
 	MAINFRAME_MENU_ID_NFC_RECENT_0,
@@ -166,6 +181,7 @@ enum
 	MAINFRAME_MENU_ID_DEBUG_DUMP_SHADERS,
 	MAINFRAME_MENU_ID_DEBUG_DUMP_RECOMPILER_FUNCTIONS,
 	MAINFRAME_MENU_ID_DEBUG_DUMP_RAM,
+	MAINFRAME_MENU_ID_DEBUG_DUMP_RPX,
 	MAINFRAME_MENU_ID_DEBUG_DUMP_FST,
 	MAINFRAME_MENU_ID_DEBUG_DUMP_CURL_REQUESTS,
 	// help
@@ -179,6 +195,7 @@ wxDEFINE_EVENT(wxEVT_SET_WINDOW_TITLE, wxCommandEvent);
 wxDEFINE_EVENT(wxEVT_REQUEST_GAMELIST_REFRESH, wxCommandEvent);
 wxDEFINE_EVENT(wxEVT_LAUNCH_GAME, wxLaunchGameEvent);
 wxDEFINE_EVENT(wxEVT_REQUEST_RECREATE_CANVAS, wxCommandEvent);
+wxDEFINE_EVENT(wxEVT_REQUEST_GAME_EXIT, wxCommandEvent);
 
 wxBEGIN_EVENT_TABLE(MainWindow, wxFrame)
 EVT_TIMER(MAINFRAME_ID_TIMER1, MainWindow::OnTimer)
@@ -195,6 +212,15 @@ EVT_MENU(MAINFRAME_MENU_ID_FILE_OPEN_SHADERCACHE_FOLDER, MainWindow::OnOpenFolde
 EVT_MENU(MAINFRAME_MENU_ID_FILE_CLEAR_SPOTPASS_CACHE, MainWindow::OnClearSpotPassCache)
 EVT_MENU(MAINFRAME_MENU_ID_FILE_EXIT, MainWindow::OnFileExit)
 EVT_MENU(MAINFRAME_MENU_ID_FILE_END_EMULATION, MainWindow::OnFileMenu)
+EVT_MENU(MAINFRAME_MENU_ID_FILE_SAVE_STATE, MainWindow::OnSaveState)
+EVT_MENU(MAINFRAME_MENU_ID_FILE_LOAD_STATE, MainWindow::OnLoadState)
+EVT_MENU_RANGE(MAINFRAME_MENU_ID_FILE_SAVE_STATE_SLOT_0, MAINFRAME_MENU_ID_FILE_SAVE_STATE_SLOT_LAST, MainWindow::OnSaveStateSlot)
+EVT_MENU_RANGE(MAINFRAME_MENU_ID_FILE_LOAD_STATE_SLOT_0, MAINFRAME_MENU_ID_FILE_LOAD_STATE_SLOT_LAST, MainWindow::OnLoadStateSlot)
+EVT_MENU_RANGE(MAINFRAME_MENU_ID_FILE_DELETE_STATE_SLOT_0, MAINFRAME_MENU_ID_FILE_DELETE_STATE_SLOT_LAST, MainWindow::OnDeleteStateSlot)
+EVT_MENU(MAINFRAME_MENU_ID_FILE_SAVE_STATE_TO_FILE, MainWindow::OnSaveStateToFile)
+EVT_MENU(MAINFRAME_MENU_ID_FILE_LOAD_STATE_FROM_FILE, MainWindow::OnLoadStateFromFile)
+EVT_MENU(MAINFRAME_MENU_ID_FILE_OPEN_SAVESTATE_FOLDER, MainWindow::OnOpenSaveStateFolder)
+EVT_MENU(MAINFRAME_MENU_ID_FILE_UNDO_LOAD_STATE, MainWindow::OnUndoLoadState)
 EVT_MENU(MAINFRAME_MENU_ID_FILE_PAUSE_EMULATION, MainWindow::OnPauseMenu)
 EVT_MENU(MAINFRAME_MENU_ID_OPTIONS_PAUSE_ON_FOCUS_LOSS, MainWindow::OnPauseMenu)
 EVT_MENU_RANGE(MAINFRAME_MENU_ID_FILE_RECENT_0 + 0, MAINFRAME_MENU_ID_FILE_RECENT_LAST, MainWindow::OnFileMenu)
@@ -249,6 +275,7 @@ EVT_MENU(MAINFRAME_MENU_ID_DEBUG_AUDIO_AUX_ONLY, MainWindow::OnDebugSetting)
 EVT_MENU(MAINFRAME_MENU_ID_DEBUG_VK_ACCURATE_BARRIERS, MainWindow::OnDebugSetting)
 EVT_MENU(MAINFRAME_MENU_ID_DEBUG_GPU_CAPTURE, MainWindow::OnDebugSetting)
 EVT_MENU(MAINFRAME_MENU_ID_DEBUG_DUMP_RAM, MainWindow::OnDebugSetting)
+EVT_MENU(MAINFRAME_MENU_ID_DEBUG_DUMP_RPX, MainWindow::OnDebugSetting)
 EVT_MENU(MAINFRAME_MENU_ID_DEBUG_DUMP_FST, MainWindow::OnDebugSetting)
 // debug -> View ...
 EVT_MENU(MAINFRAME_MENU_ID_DEBUG_VIEW_LOGGING_WINDOW, MainWindow::OnLoggingWindow)
@@ -267,8 +294,8 @@ EVT_COMMAND(wxID_ANY, wxEVT_GAMELIST_BEGIN_UPDATE, MainWindow::OnGameListBeginUp
 EVT_COMMAND(wxID_ANY, wxEVT_GAMELIST_END_UPDATE, MainWindow::OnGameListEndUpdate)
 EVT_COMMAND(wxID_ANY, wxEVT_ACCOUNTLIST_REFRESH, MainWindow::OnAccountListRefresh)
 EVT_COMMAND(wxID_ANY, wxEVT_SET_WINDOW_TITLE, MainWindow::OnSetWindowTitle)
-
 EVT_COMMAND(wxID_ANY, wxEVT_REQUEST_RECREATE_CANVAS, MainWindow::OnRequestRecreateCanvas)
+EVT_COMMAND(wxID_ANY, wxEVT_REQUEST_GAME_EXIT, MainWindow::OnRequestGameExit)
 
 wxEND_EVENT_TABLE()
 
@@ -415,6 +442,9 @@ MainWindow::MainWindow()
 	{
 			g_gdbstub = std::make_unique<GDBServer>(GetConfig().gdb_port);
 	}
+
+	if (LaunchSettings::OpenDebuggerEnabled())
+		OpenPPCDebugger();
 }
 
 MainWindow::~MainWindow()
@@ -600,8 +630,7 @@ bool MainWindow::FileLoad(const fs::path launchPath, wxLaunchGameEvent::INITIATE
 			wxMessageBox(t, _("Error"), wxOK | wxCENTRE | wxICON_ERROR);
 			return false;
 		}
-		else if (initiatedBy == wxLaunchGameEvent::INITIATED_BY::MENU ||
-			initiatedBy == wxLaunchGameEvent::INITIATED_BY::COMMAND_LINE)
+		else
 		{
 			wxString t = _("Unable to launch game\nPath:\n");
 			t.append(_pathToUtf8(launchPath));
@@ -615,13 +644,6 @@ bool MainWindow::FileLoad(const fs::path launchPath, wxLaunchGameEvent::INITIATE
 				t.append("\n\n");
 				t.append(_("Could not decrypt title because title.tik is missing."));
 			}
-			wxMessageBox(t, _("Error"), wxOK | wxCENTRE | wxICON_ERROR);
-			return false;
-		}
-		else
-		{
-			wxString t = _("Unable to launch game\nPath:\n");
-			t.append(_pathToUtf8(launchPath));
 			wxMessageBox(t, _("Error"), wxOK | wxCENTRE | wxICON_ERROR);
 			return false;
 		}
@@ -866,7 +888,11 @@ void MainWindow::OnPauseMenu(wxCommandEvent& event)
 {
 	const bool checked = event.IsChecked();
 	if (event.GetId() == MAINFRAME_MENU_ID_FILE_PAUSE_EMULATION)
+	{
 		SetEmulationPaused(checked);
+		if (checked && !CafeSystem::IsTitlePaused() && CafeSystem::IsTitleOnline())
+			wxMessageBox(_("Pause is unavailable while the game is online: a paused game stops answering, and the session drops you."), _("Pause emulation"), wxOK | wxICON_INFORMATION, this);
+	}
 	else
 	{
 		GetWxGUIConfig().pause_on_focus_loss = checked;
@@ -881,6 +907,8 @@ void MainWindow::PauseForFocusLoss()
 	if (!GetWxGUIConfig().pause_on_focus_loss || !m_game_launched || !CafeSystem::IsTitleRunning() || CafeSystem::IsTitlePaused())
 		return;
 	CafeSystem::PauseTitle();
+	if (!CafeSystem::IsTitlePaused())
+		return; // refused, the game is online
 	m_autoPaused = true;
 	if (m_pauseMenuItem)
 		m_pauseMenuItem->Check(true);
@@ -1045,6 +1073,129 @@ void MainWindow::OnNFCMenu(wxCommandEvent& event)
 void MainWindow::OnFileExit(wxCommandEvent& event)
 {
 	Close();
+}
+
+// All four handlers run on the wx GUI thread, which is what the quiesce protocol requires
+// (a scheduler thread would wait for itself to park). The capture is synchronous, so the
+// UI is unresponsive for the duration -- bounded by the quiesce timeout plus the memory
+// copy. Moving this to a worker thread is a UX-phase item.
+void MainWindow::SaveStateToSlot(uint32 slot)
+{
+	const fs::path path = SaveStates::GetSlotPath(slot);
+	if (path.empty())
+		return;
+	const SaveStates::OperationResult result = SaveStates::SaveToFile(path);
+	if (!result.success)
+	{
+		wxMessageBox(wxString::FromUTF8(result.message), _("Save state failed"), wxOK | wxICON_ERROR, this);
+		return;
+	}
+	// The slot menus carry each slot's timestamp, so they are stale the moment one is
+	// written. Deferred because this runs inside the menu's own event dispatch.
+	CallAfter([this]() { RecreateMenu(); });
+}
+
+void MainWindow::LoadStateFromSlot(uint32 slot)
+{
+	const fs::path path = SaveStates::GetSlotPath(slot);
+	if (path.empty())
+		return;
+	const SaveStates::OperationResult result = SaveStates::LoadFromFile(path);
+	if (!result.success)
+		wxMessageBox(wxString::FromUTF8(result.message), _("Load state failed"), wxOK | wxICON_ERROR, this);
+	// Whether there is anything to undo to has just changed.
+	CallAfter([this]() { RecreateMenu(); });
+}
+
+// Slot 0 is what the plain save/load commands act on, so the existing menu entries and
+// anything driving them keep working unchanged.
+void MainWindow::OnSaveState(wxCommandEvent& event)
+{
+	SaveStateToSlot(0);
+}
+
+void MainWindow::OnLoadState(wxCommandEvent& event)
+{
+	LoadStateFromSlot(0);
+}
+
+void MainWindow::OnSaveStateSlot(wxCommandEvent& event)
+{
+	SaveStateToSlot((uint32)(event.GetId() - MAINFRAME_MENU_ID_FILE_SAVE_STATE_SLOT_0));
+}
+
+void MainWindow::OnLoadStateSlot(wxCommandEvent& event)
+{
+	LoadStateFromSlot((uint32)(event.GetId() - MAINFRAME_MENU_ID_FILE_LOAD_STATE_SLOT_0));
+}
+
+// Deleting is the one management action that cannot be done from inside the emulator any
+// other way, and a slot whose contents you cannot identify is a slot you will not reuse.
+void MainWindow::OnDeleteStateSlot(wxCommandEvent& event)
+{
+	const uint32 slot = (uint32)(event.GetId() - MAINFRAME_MENU_ID_FILE_DELETE_STATE_SLOT_0);
+	const fs::path path = SaveStates::GetSlotPath(slot);
+	if (path.empty())
+		return;
+	if (wxMessageBox(wxString::Format(_("Delete the save state in slot %u?"), slot), _("Delete save state"),
+					 wxYES_NO | wxNO_DEFAULT | wxICON_QUESTION, this) != wxYES)
+		return;
+	std::error_code ec;
+	fs::remove(path, ec);
+	if (ec)
+		wxMessageBox(wxString::FromUTF8(ec.message()), _("Delete save state failed"), wxOK | wxICON_ERROR, this);
+	CallAfter([this]() { RecreateMenu(); });
+}
+
+static wxString GetStateFileWildcard()
+{
+	return _("Cemu save states (*.cst)|*.cst|All files (*.*)|*");
+}
+
+// Save states are per title and per build, so a file outside the slot folder is only
+// useful for keeping one aside or moving it between machines running the same build.
+// The fingerprint check still gates the load, so a mismatched file is refused rather
+// than half-applied.
+void MainWindow::OnSaveStateToFile(wxCommandEvent& event)
+{
+	wxFileDialog dialog(this, _("Save state to file"), wxEmptyString, "state.cst",
+						GetStateFileWildcard(), wxFD_SAVE | wxFD_OVERWRITE_PROMPT);
+	if (dialog.ShowModal() == wxID_CANCEL || dialog.GetPath().IsEmpty())
+		return;
+	const SaveStates::OperationResult result = SaveStates::SaveToFile(_utf8ToPath(dialog.GetPath().utf8_string()));
+	if (!result.success)
+		wxMessageBox(wxString::FromUTF8(result.message), _("Save state failed"), wxOK | wxICON_ERROR, this);
+}
+
+void MainWindow::OnLoadStateFromFile(wxCommandEvent& event)
+{
+	wxFileDialog dialog(this, _("Load state from file"), wxEmptyString, wxEmptyString,
+						GetStateFileWildcard(), wxFD_OPEN | wxFD_FILE_MUST_EXIST);
+	if (dialog.ShowModal() == wxID_CANCEL || dialog.GetPath().IsEmpty())
+		return;
+	const SaveStates::OperationResult result = SaveStates::LoadFromFile(_utf8ToPath(dialog.GetPath().utf8_string()));
+	if (!result.success)
+		wxMessageBox(wxString::FromUTF8(result.message), _("Load state failed"), wxOK | wxICON_ERROR, this);
+	CallAfter([this]() { RecreateMenu(); });
+}
+
+// Undo is itself a load, so it captures its own undo snapshot on the way through and the
+// action toggles. The menu has to be rebuilt afterwards either way, since whether there is
+// anything to undo to has just changed.
+void MainWindow::OnUndoLoadState(wxCommandEvent& event)
+{
+	const SaveStates::OperationResult result = SaveStates::UndoLoadState();
+	if (!result.success)
+		wxMessageBox(wxString::FromUTF8(result.message), _("Undo load state failed"), wxOK | wxICON_ERROR, this);
+	CallAfter([this]() { RecreateMenu(); });
+}
+
+void MainWindow::OnOpenSaveStateFolder(wxCommandEvent& event)
+{
+	const fs::path path = SaveStates::GetSlotPath(0);
+	if (path.empty())
+		return;
+	wxLaunchDefaultApplication(wxHelper::FromPath(path.parent_path()));
 }
 
 void MainWindow::TogglePadView()
@@ -1294,6 +1445,8 @@ void MainWindow::OnDebugSetting(wxCommandEvent& event)
 		ActiveSettings::EnableAudioOnlyAux(event.IsChecked());
 	else if (event.GetId() == MAINFRAME_MENU_ID_DEBUG_DUMP_RAM)
 		memory_createDump();
+	else if (event.GetId() == MAINFRAME_MENU_ID_DEBUG_DUMP_RPX)
+		CafeSystem::DumpCurrentRPX();
 	else if (event.GetId() == MAINFRAME_MENU_ID_DEBUG_DUMP_FST)
 	{
 		/*	int msgBoxAnswer = wxMessageBox(_("All files from the currently running game will be dumped to /dump/<gamefolder>. This process can take a few minutes."),
@@ -1446,6 +1599,14 @@ void MainWindow::OnDebugViewPPCDebugger(wxCommandEvent& event)
 		m_debugger_window = nullptr;
 		return;
 	}
+
+	OpenPPCDebugger();
+}
+
+void MainWindow::OpenPPCDebugger()
+{
+	if (m_debugger_window)
+		return;
 
 	auto rect = GetDesktopRect();
 	/*
@@ -2089,7 +2250,9 @@ void MainWindow::SetMenuVisible(bool state)
 	if (m_menu_visible == state)
 		return;
 
+#if !BOOST_OS_MACOS // on macOS hiding the menu seems to cause issues (see #609)
 	SetMenuBar(state ? m_menuBar : nullptr);
+#endif
 	m_menu_visible = state;
 }
 
@@ -2481,6 +2644,66 @@ void MainWindow::RecreateMenu()
 		m_pauseMenuItem = m_fileMenu->AppendCheckItem(MAINFRAME_MENU_ID_FILE_PAUSE_EMULATION, _("&Pause emulation"));
 		m_pauseMenuItem->Check(CafeSystem::IsTitlePaused());
 		m_fileMenu->AppendSeparator();
+		// Save states are only meaningful while a title is running, and phase 0 supports
+		// load-into-running-title only.
+		//
+		// The slot submenus are the picker: each entry carries the state's timestamp, read
+		// from the file's uncompressed header, so choosing does not mean guessing which
+		// slot0/slot1 was which. A slot that exists but cannot be loaded into this world
+		// says why and is disabled, rather than failing after being picked.
+		wxMenu* saveStateMenu = new wxMenu();
+		wxMenu* loadStateMenu = new wxMenu();
+		wxMenu* deleteStateMenu = new wxMenu();
+		bool anyStateExists = false;
+		for (uint32 slot = 0; slot < SaveStates::kSlotCount; slot++)
+		{
+			const SaveStates::SlotInfo info = SaveStates::QuerySlot(slot);
+			wxString description;
+			if (!info.exists)
+				description = _("empty");
+			else if (!info.incompatibility.empty())
+				description = wxString::FromUTF8(info.incompatibility);
+			else
+			{
+				const std::time_t timestamp = (std::time_t)info.head.unixTimestamp;
+				std::tm local{};
+#if BOOST_OS_WINDOWS
+				localtime_s(&local, &timestamp);
+#else
+				localtime_r(&timestamp, &local);
+#endif
+				char formatted[64];
+				std::strftime(formatted, sizeof(formatted), "%Y-%m-%d %H:%M:%S", &local);
+				description = wxString::FromUTF8(formatted);
+			}
+
+			const wxString label = wxString::Format(_("Slot %u  (%s)"), slot, description);
+			saveStateMenu->Append(MAINFRAME_MENU_ID_FILE_SAVE_STATE_SLOT_0 + slot, label);
+			wxMenuItem* loadItem = loadStateMenu->Append(MAINFRAME_MENU_ID_FILE_LOAD_STATE_SLOT_0 + slot, label);
+			wxMenuItem* deleteItem = deleteStateMenu->Append(MAINFRAME_MENU_ID_FILE_DELETE_STATE_SLOT_0 + slot, label);
+			// A slot that cannot be loaded can still be deleted -- that is precisely when
+			// you want to get rid of it.
+			if (!info.exists || !info.incompatibility.empty())
+				loadItem->Enable(false);
+			deleteItem->Enable(info.exists);
+			anyStateExists |= info.exists;
+		}
+		saveStateMenu->AppendSeparator();
+		saveStateMenu->Append(MAINFRAME_MENU_ID_FILE_SAVE_STATE_TO_FILE, _("To file..."));
+		loadStateMenu->AppendSeparator();
+		loadStateMenu->Append(MAINFRAME_MENU_ID_FILE_LOAD_STATE_FROM_FILE, _("From file..."));
+		wxMenuItem* undoItem = loadStateMenu->Append(MAINFRAME_MENU_ID_FILE_UNDO_LOAD_STATE, _("Undo load state"));
+		undoItem->Enable(SaveStates::HasUndoState());
+
+		m_fileMenu->AppendSubMenu(saveStateMenu, _("Save state to"));
+		m_fileMenu->AppendSubMenu(loadStateMenu, _("Load state from"));
+		wxMenuItem* deleteSubMenuItem = m_fileMenu->AppendSubMenu(deleteStateMenu, _("Delete save state"));
+		deleteSubMenuItem->Enable(anyStateExists);
+		m_fileMenu->Append(MAINFRAME_MENU_ID_FILE_OPEN_SAVESTATE_FOLDER, _("Open save state folder"));
+		m_fileMenu->AppendSeparator();
+		m_fileMenu->Append(MAINFRAME_MENU_ID_FILE_SAVE_STATE, _("Quick save state (slot 0)"));
+		m_fileMenu->Append(MAINFRAME_MENU_ID_FILE_LOAD_STATE, _("Quick load state (slot 0)"));
+		m_fileMenu->AppendSeparator();
 #ifdef CEMU_DEBUG_ASSERT
 		m_fileMenu->Append(MAINFRAME_MENU_ID_FILE_END_EMULATION, _("Close game"));
 		m_fileMenuSeparator1 = m_fileMenu->AppendSeparator();
@@ -2652,6 +2875,7 @@ void MainWindow::RecreateMenu()
 	logCosModulesMenu->AppendCheckItem(MAINFRAME_MENU_ID_DEBUG_LOGGING0 + stdx::to_underlying(LogType::Socket), _("nsysnet API"))->Check(cemuLog_isLoggingEnabled(LogType::Socket));
 	logCosModulesMenu->AppendCheckItem(MAINFRAME_MENU_ID_DEBUG_LOGGING0 + stdx::to_underlying(LogType::H264), _("h264 API"))->Check(cemuLog_isLoggingEnabled(LogType::H264));
 	logCosModulesMenu->AppendCheckItem(MAINFRAME_MENU_ID_DEBUG_LOGGING0 + stdx::to_underlying(LogType::GX2), _("gx2 API"))->Check(cemuLog_isLoggingEnabled(LogType::GX2));
+	logCosModulesMenu->AppendCheckItem(MAINFRAME_MENU_ID_DEBUG_LOGGING0 + stdx::to_underlying(LogType::SWKBD), _("swkbd API"))->Check(cemuLog_isLoggingEnabled(LogType::SWKBD));
 	logCosModulesMenu->AppendCheckItem(MAINFRAME_MENU_ID_DEBUG_LOGGING0 + stdx::to_underlying(LogType::SoundAPI), _("Audio API"))->Check(cemuLog_isLoggingEnabled(LogType::SoundAPI));
 	logCosModulesMenu->AppendCheckItem(MAINFRAME_MENU_ID_DEBUG_LOGGING0 + stdx::to_underlying(LogType::InputAPI), _("Input API"))->Check(cemuLog_isLoggingEnabled(LogType::InputAPI));
 
@@ -2707,7 +2931,8 @@ void MainWindow::RecreateMenu()
 	debugMenu->Append(MAINFRAME_MENU_ID_DEBUG_VIEW_PPC_DEBUGGER, _("&View PPC debugger"));
 	debugMenu->Append(MAINFRAME_MENU_ID_DEBUG_VIEW_AUDIO_DEBUGGER, _("&View audio debugger"));
 	debugMenu->Append(MAINFRAME_MENU_ID_DEBUG_VIEW_TEXTURE_RELATIONS, _("&View texture cache info"));
-	debugMenu->Append(MAINFRAME_MENU_ID_DEBUG_DUMP_RAM, _("&Dump current RAM"));
+	debugMenu->Append(MAINFRAME_MENU_ID_DEBUG_DUMP_RAM, _("&Dump current RAM"))->Enable(m_game_launched);
+	debugMenu->Append(MAINFRAME_MENU_ID_DEBUG_DUMP_RPX, _("&Dump current RPX"))->Enable(m_game_launched);
 	// debugMenu->Append(MAINFRAME_MENU_ID_DEBUG_DUMP_FST, _("&Dump WUD filesystem"))->Enable(false);
 
 	m_menuBar->Append(debugMenu, _("&Debug"));
@@ -2811,6 +3036,27 @@ void MainWindow::CafeRecreateCanvas()
 	evt->SetClientData((void*)&sem);
 	wxQueueEvent(g_mainFrame, evt);
 	sem.decrementWithWait();
+}
+
+void MainWindow::CafePPCProcessExit()
+{
+	// this is called from the emulated PPC thread, so queue an event instead of handling it directly
+	wxQueueEvent(g_mainFrame, new wxCommandEvent(wxEVT_REQUEST_GAME_EXIT));
+}
+
+void MainWindow::OnRequestGameExit(wxCommandEvent& event)
+{
+	// if the title was launched via the command line we close Cemu and use the foreground title's exit status as Cemu's process return code (via CemuApp:OnExit)
+	// this is useful for homebrew testing setups that use Cemu via CLI
+	// otherwise the title was launched from the game list, so we just stop it and return to the game list instead of closing Cemu
+	if (LaunchSettings::GetLoadFile() || LaunchSettings::GetLoadTitleID())
+	{
+		Close();
+	}
+	else
+	{
+		EndEmulation();
+	}
 }
 
 bool MainWindow::FullscreenEnabled() const

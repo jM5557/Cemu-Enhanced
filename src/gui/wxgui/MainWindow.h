@@ -78,6 +78,7 @@ public:
 	void UpdateNFCMenu();
 	bool IsMenuHidden() const;
 	void TogglePadView();
+	void OpenPPCDebugger();
 
 	// Game Mode (View > Game Mode): the controller-first launcher replaces the game list and
 	// the menu bar is hidden. Leaving it is only offered from the launcher, i.e. with no game running.
@@ -112,6 +113,17 @@ public:
 	void OnLaunchFromFile(wxLaunchGameEvent& event);
 	void OnInstallUpdate(wxCommandEvent& event);
 	void OnFileExit(wxCommandEvent& event);
+	void OnSaveState(wxCommandEvent& event);
+	void OnLoadState(wxCommandEvent& event);
+	void OnSaveStateSlot(wxCommandEvent& event);
+	void OnLoadStateSlot(wxCommandEvent& event);
+	void SaveStateToSlot(uint32 slot);
+	void LoadStateFromSlot(uint32 slot);
+	void OnDeleteStateSlot(wxCommandEvent& event);
+	void OnSaveStateToFile(wxCommandEvent& event);
+	void OnLoadStateFromFile(wxCommandEvent& event);
+	void OnOpenSaveStateFolder(wxCommandEvent& event);
+	void OnUndoLoadState(wxCommandEvent& event);
 	void OnNFCMenu(wxCommandEvent& event);
 	void OnOptionsInput(wxCommandEvent& event);
 	void OnAccountSelect(wxCommandEvent& event);
@@ -173,8 +185,11 @@ private:
 
 	// CafeSystem implementation
 	void CafeRecreateCanvas() override;
+	void CafePPCProcessExit() override;
 
+	void OnRequestRestart(wxCommandEvent& event);
 	void OnRequestRecreateCanvas(wxCommandEvent& event);
+	void OnRequestGameExit(wxCommandEvent& event);
 
 	wxRect GetDesktopRect();
 

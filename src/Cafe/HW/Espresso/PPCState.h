@@ -104,6 +104,18 @@ struct PPCInterpreter_t
 
 	// extra variables for recompiler
 	void* rspTemp;
+	// Guest stack pointer captured on entry to the current HLE call.
+	//
+	// Several HLE functions allocate guest-stack scratch via StackAllocator, which moves
+	// gpr[1] down and only restores it when the call returns. A thread that blocks in such a
+	// call therefore has a stored stack pointer below its real one. Save states restart a
+	// blocked call from the beginning, so they need the value from before that adjustment --
+	// restarting with the blocked value leaks the scratch area, leaving guest code to read its
+	// saved link register from the wrong slot when it eventually returns.
+	//
+	// Kept last: the recompilers address the fields above by offset, and the AArch64 backend
+	// needs temporaryFPR 16-byte aligned.
+	uint32 hleEntryStackPointer;
 };
 
 // parameter access (legacy C style)
@@ -214,6 +226,12 @@ uint64 PPCTimer_getRawTsc();
 
 void PPCTimer_start();
 
+namespace SaveStates
+{
+	class StateStream;
+}
+void PPCTimer_DoState(SaveStates::StateStream& s);
+
 // core info and control
 extern uint32 ppcThreadQuantum;
 
@@ -236,6 +254,7 @@ using HLEIDX = sint32;
 
 HLEIDX PPCInterpreter_registerHLECall(HLECALL hleCall, std::string hleName);
 HLECALL PPCInterpreter_getHLECall(HLEIDX funcIndex);
+const char* PPCInterpreter_getHLEName(HLEIDX funcIndex); // never null; for logs and diagnostics
 
 // HLE scheduler
 
@@ -248,6 +267,7 @@ void PPCCore_switchToScheduler();
 void PPCCore_switchToSchedulerWithLock();
 
 PPCInterpreter_t* PPCCore_executeCallbackInternal(uint32 functionMPTR);
+uint32 PPCCore_getCallbackExitStubAddr(); // stable addr of the guest callback return stub
 void PPCCore_init();
 
 // LLE scheduler

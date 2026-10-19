@@ -343,6 +343,11 @@ namespace GameMode
 		// Pause / resume goes through the main window so File > Pause emulation stays in step
 		void SetPaused(bool paused)
 		{
+			if (paused && CafeSystem::IsTitleOnline())
+			{
+				s_state.message = U8(_("Pause is unavailable while the game is online"));
+				return;
+			}
 			wxTheApp->CallAfter([paused]() {
 				if (g_mainFrame)
 					g_mainFrame->SetEmulationPaused(paused);
@@ -368,7 +373,22 @@ namespace GameMode
 			});
 		}
 
+		// Same as View > Game Mode. The game keeps running either way: off brings back the
+		// regular window and its menu bar, on hides them (the launcher waits for the game to close).
+		void SetGameMode(bool enabled)
+		{
+			wxTheApp->CallAfter([enabled]() {
+				if (g_mainFrame)
+					g_mainFrame->SetGameModeEnabled(enabled);
+			});
+		}
+
 		// ---- pages ----
+
+		// Main page rows, in BuildItems() order, for putting the focus back after a sub-page
+		constexpr int kMainRowLayout = 3;
+		constexpr int kMainRowCheats = 5;
+		constexpr int kMainRowExitCemu = 9;
 
 		std::vector<Item> BuildItems()
 		{
@@ -444,6 +464,14 @@ namespace GameMode
 				swap.adjust = [](int dir) { LatteGPUState.isDRCPrimary = dir > 0; };
 				items.push_back(swap);
 
+				Item gameMode;
+				gameMode.kind = ItemKind::Toggle;
+				gameMode.label = U8(_("Game Mode"));
+				gameMode.on = GetWxGUIConfig().game_mode;
+				gameMode.activate = []() { SetGameMode(!GetWxGUIConfig().game_mode); };
+				gameMode.adjust = [](int dir) { SetGameMode(dir > 0); };
+				items.push_back(gameMode);
+
 				Item exit;
 				exit.label = U8(_("Exit Cemu"));
 				exit.danger = true;
@@ -465,7 +493,7 @@ namespace GameMode
 					item.activate = [&st, layout]() {
 						SetLayout(layout);
 						st.page = Page::Main;
-						st.focus = 1;
+						st.focus = kMainRowLayout;
 					};
 					items.push_back(item);
 				}
@@ -491,7 +519,7 @@ namespace GameMode
 				cancel.label = U8(_("Keep playing"));
 				cancel.activate = [&st]() {
 					st.page = Page::Main;
-					st.focus = 6;
+					st.focus = kMainRowExitCemu;
 				};
 				items.push_back(cancel);
 				Item exit;
@@ -527,15 +555,15 @@ namespace GameMode
 				break;
 			case Page::Layout:
 				st.page = Page::Main;
-				st.focus = 1;
+				st.focus = kMainRowLayout;
 				break;
 			case Page::Cheats:
 				st.page = Page::Main;
-				st.focus = 3;
+				st.focus = kMainRowCheats;
 				break;
 			case Page::ConfirmExit:
 				st.page = Page::Main;
-				st.focus = 6;
+				st.focus = kMainRowExitCemu;
 				break;
 			}
 		}

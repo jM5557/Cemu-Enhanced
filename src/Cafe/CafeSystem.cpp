@@ -452,9 +452,10 @@ namespace CafeSystem
 	std::optional<sint32> s_foregroundReturnStatus;
 
 	bool sSystemRunning = false;
-	std::atomic_bool sTitlePaused = false;
-	std::mutex sPauseMutex;
 	TitleId sForegroundTitleId = 0;
+
+	std::atomic_bool sTitlePaused = false; // read by the CPU idle loop and the GPU thread
+	std::recursive_mutex sPauseMutex; // see GetPauseMutex()
 
 	GameInfo2 sGameInfo_ForegroundTitle;
 
@@ -937,6 +938,11 @@ namespace CafeSystem
 	bool IsTitleRunning()
 	{
 		return sSystemRunning;
+	}
+
+	std::recursive_mutex& GetPauseMutex()
+	{
+		return sPauseMutex;
 	}
 
 	void PauseTitle()

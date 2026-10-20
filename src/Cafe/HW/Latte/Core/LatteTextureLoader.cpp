@@ -667,9 +667,11 @@ void LatteTextureLoader_UpdateTextureSliceData(LatteTexture* tex, uint32 sliceIn
 	const bool _replUncompressed = LatteTextureReplace::IsReplaceableUncompressed(format) && !_replGpuOwned;
 	if (mipIndex == 0 && sliceIndex == 0 && LatteTextureReplace::IsEnabled() && (Latte::IsCompressedFormat(format) || _replUncompressed))
 	{
-		tex->replStrongHash = LatteTextureReplace::HashGuest(physImagePtr, (uint32)textureLoader.maxOffsetOutdated, tex->width * tex->height, format);
-		// Read on every reload, since a reused texture object can now hold a different texture
-		tex->replFilter = (uint8)LatteTextureReplace::GetFilter(tex->replStrongHash);
+		// The filter is read with the hash on every reload, since a reused texture object can now
+		// hold a different texture
+		LatteTextureReplace::FilterOverride filter;
+		tex->replStrongHash = LatteTextureReplace::HashGuest(physImagePtr, (uint32)textureLoader.maxOffsetOutdated, tex->width * tex->height, format, &filter);
+		tex->replFilter = (uint8)filter;
 		// Same inputs, pre-discriminator algorithm. Only used to build rename_map.csv so an existing
 		// pack can be migrated to the new names; nothing looks a texture up by this. Recorded here
 		// rather than from the dump block below because it needs only the two hashes, and because
@@ -682,6 +684,12 @@ void LatteTextureLoader_UpdateTextureSliceData(LatteTexture* tex, uint32 sliceIn
 			for (sint32 m = 0; m < std::max<sint32>(1, tex->mipLevels); m++)
 				LatteTextureReplace::RecordRenameMapping(tex->replLegacyHash, currentHash, tex->width, tex->height, (uint32)format, m);
 		}
+	}
+	else if (mipIndex == 0 && sliceIndex == 0)
+	{
+		// Not hashed: packs were switched off (from the Game Menu or Custom textures mid-game), or the
+		// object now holds a render target. Either way the previous texture's filter no longer applies.
+		tex->replFilter = 0;
 	}
 
 	// A texture object that already exists is reused when the game puts different data at the same

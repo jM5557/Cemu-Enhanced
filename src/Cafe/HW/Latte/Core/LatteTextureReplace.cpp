@@ -383,17 +383,33 @@ namespace LatteTextureReplace
 		return false;
 	}
 
-	uint64_t HashGuest(uint32_t physImagePtr, uint32_t sizeBytes, uint32_t pixelCount, Latte::E_GX2SURFFMT fmt){
+	// [filtering] for a texture: by the key HashGuest returned, then by the texture's other name (the
+	// current hash when an older pack matched, or the reverse), so a filter applies whichever scheme
+	// the ini's key uses. Caller holds s_mutex.
+	static FilterOverride lookupFilter(uint64_t key, uint64_t otherKey){
+		if(s_filters.empty()) return FilterOverride::None;
+		if(auto it=s_filters.find(key); it!=s_filters.end()) return (FilterOverride)it->second;
+		if(otherKey!=key)
+			if(auto it=s_filters.find(otherKey); it!=s_filters.end()) return (FilterOverride)it->second;
+		return FilterOverride::None;
+	}
+
+	uint64_t HashGuest(uint32_t physImagePtr, uint32_t sizeBytes, uint32_t pixelCount, Latte::E_GX2SURFFMT fmt, FilterOverride* filterOut){
+		if(filterOut) *filterOut=FilterOverride::None;
 		if(!s_enabled) { std::scoped_lock lock(s_mutex); EnsureInit(); if(!s_enabled) return 0; }
 		const uint8* p=(const uint8*)memory_getPointerFromPhysicalOffset(physImagePtr);
 		if(!p||!sizeBytes) return 0;
 		const uint64_t raw = HashData(p, sizeBytes);
 		const uint64_t current = MixDiscriminators(raw, sizeBytes, pixelCount, fmt);
 		std::scoped_lock lock(s_mutex); EnsureInit();
-		if(raw==0 || s_index.count(current)) return current;
-		auto it=s_index.find(raw);
-		if(it!=s_index.end() && matchesLegacyName(it->second, pixelCount, fmt)) return raw;
-		return current;
+		uint64_t key=current;
+		if(raw!=0 && !s_index.count(current)){
+			auto it=s_index.find(raw);
+			if(it!=s_index.end() && matchesLegacyName(it->second, pixelCount, fmt)) key=raw;
+		}
+		// Under the lock already held here, instead of a second locked call per texture load
+		if(filterOut && s_enabled) *filterOut=lookupFilter(key, key==raw ? current : raw);
+		return key;
 	}
 
 	uint64_t HashGuestRaw(uint32_t physImagePtr, uint32_t sizeBytes){
@@ -434,8 +450,7 @@ namespace LatteTextureReplace
 		if(contentHash==0) return FilterOverride::None;
 		std::scoped_lock lock(s_mutex); EnsureInit();
 		if(!s_enabled) return FilterOverride::None;
-		auto it=s_filters.find(contentHash);
-		return it==s_filters.end() ? FilterOverride::None : (FilterOverride)it->second;
+		return lookupFilter(contentHash, contentHash);
 	}
 
 	const LatteTextureReplace_Entry* GetSlice(uint64_t contentHash, int mipIndex){
